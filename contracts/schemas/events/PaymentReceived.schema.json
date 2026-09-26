@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.event-platform.local/schemas/events/PaymentReceived.schema.json",
+  "title": "PaymentReceived",
+  "description": "Domain event: a payment against an invoice has been received and confirmed by the provider.",
+  "allOf": [
+    { "$ref": "../envelope.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "event" },
+        "type": { "const": "PaymentReceived" },
+        "schemaVersion": { "const": "1.0" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "paymentId": { "type": "string", "minLength": 1 },
+            "invoiceId": { "type": "string", "minLength": 1 },
+            "customerId": { "type": "string", "minLength": 1 },
+            "amount": { "type": "integer", "minimum": 0, "description": "Minor currency units." },
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "ISO 4217, upper case." },
+            "receivedAt": { "type": "string", "format": "date-time" },
+            "provider": { "type": "string", "minLength": 1 }
+          },
+          "required": ["paymentId", "invoiceId", "customerId", "amount", "currency", "receivedAt", "provider"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["kind", "type", "schemaVersion", "data"]
+    }
+  ]
+}

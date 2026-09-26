@@ -1,0 +1,202 @@
+# https://taskfile.dev — every developer and CI command lives here. CI calls these same targets.
+version: "3"
+
+dotenv: [".env"]
+
+vars:
+  ENV: '{{.ENV | default "local"}}'
+  FUNCTIONS_ZIP: translator reconcile_invoice
+  LOCALSTACK_ENDPOINT: "http://localhost.localstack.cloud:4566"
+  LOCAL_REGION: "eu-west-1"
+  TF_DIR: infra
+  # Terraform for AWS, terraform-local (tflocal) for LocalStack. Same code, same backend type.
+  TF: '{{if eq .ENV "local"}}tflocal{{else}}terraform{{end}}'
+  TF_STATE_BUCKET: '{{if eq .ENV "local"}}event-platform-tfstate-local{{else}}{{.TF_STATE_BUCKET | default ""}}{{end}}'
+  REGION: '{{if eq .ENV "local"}}{{.LOCAL_REGION}}{{else}}{{.AWS_REGION | default ""}}{{end}}'
+  # LocalStack-only credentials/endpoint, prefixed to Terraform commands so nothing leaks into
+  # AWS deploys (which rely on ambient credentials and AWS_REGION).
+  LOCAL_ENV: '{{if eq .ENV "local"}}env AWS_ENDPOINT_URL={{.LOCALSTACK_ENDPOINT}} AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION={{.LOCAL_REGION}} AWS_DEFAULT_REGION={{.LOCAL_REGION}}{{end}}'
+
+env:
+  UV_PYTHON: "3.12"
+  ASYNCAPI_METRICS: "false"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+
+tasks:
+  default:
+    cmds: [task --list]
+    silent: true
+
+  setup:
+    desc: Install Python and Node dependencies (tool versions come from mise)
+    cmds:
+      - uv sync --all-extras
+      - npm ci --no-audit --no-fund
+
+  lint:
+    desc: Ruff (lint + format check), mypy, terraform fmt
+    cmds:
+      - uv run ruff check .
+      - uv run ruff format --check .
+      - uv run mypy
+      - terraform fmt -check -recursive {{.TF_DIR}}
+
+  format:
+    desc: Auto-fix lint issues and format (Python and Terraform)
+    cmds:
+      - uv run ruff format .
+      - uv run ruff check --fix .
+      - terraform fmt -recursive {{.TF_DIR}}
+
+  test:unit:
+    desc: Fast unit tests, no emulator
+    cmds:
+      - uv run pytest tests/unit -q
+
+  test:contracts:
+    desc: Validate the AsyncAPI document and every fixture against its schema
+    cmds:
+      - npx --no-install asyncapi validate contracts/asyncapi.yaml
+      - uv run pytest tests/contracts -q
+
+  build:
+    desc: Bundle zip Lambdas, export the writer image requirements and the domain registry
+    cmds:
+      - uv run python tools/build/bundle.py {{.FUNCTIONS_ZIP}}
+    sources:
+      - src/**/*.py
+      - contracts/**/*
+      - pyproject.toml
+      - uv.lock
+      - tools/build/bundle.py
+    generates:
+      - build/**/*
+
+  validate:
+    desc: terraform init (no backend) + validate. Needs no credentials.
+    deps: [build]
+    dir: "{{.TF_DIR}}"
+    cmds:
+      - terraform init -backend=false -input=false
+      - terraform validate
+
+  # Internal: backend init for ENV. AWS needs TF_STATE_BUCKET and AWS_REGION in the environment.
+  tf:init:
+    internal: true
+    dir: "{{.TF_DIR}}"
+    cmds:
+      - >-
+        {{.LOCAL_ENV}} {{.TF}} init -reconfigure -input=false
+        -backend-config="bucket={{.TF_STATE_BUCKET}}"
+        -backend-config="key=event-platform/{{.ENV}}.tfstate"
+        -backend-config="region={{.REGION}}"
+        -backend-config="use_lockfile=true"
+
+  plan:
+    desc: Terraform plan for ENV (task plan ENV=dev) and run the policy checks on it
+    deps: [build]
+    cmds:
+      - task: tf:init
+        vars: { ENV: "{{.ENV}}" }
+      - >-
+        cd {{.TF_DIR}} && {{.LOCAL_ENV}} {{.TF}} plan -input=false -var-file=envs/{{.ENV}}.tfvars
+        -out=../build/plan.{{.ENV}}.tfplan
+      - cd {{.TF_DIR}} && {{.LOCAL_ENV}} {{.TF}} show -json ../build/plan.{{.ENV}}.tfplan > ../build/plan.{{.ENV}}.json
+      - uv run python tools/build/policy_check.py build/plan.{{.ENV}}.json
+
+  policy:check:
+    desc: Guard rails over an existing plan JSON (build/plan.ENV.json)
+    cmds:
+      - uv run python tools/build/policy_check.py build/plan.{{.ENV}}.json
+
+  # ---------------------------------------------------------------- LocalStack
+  local:up:
+    desc: Start a fresh LocalStack container (needs LOCALSTACK_AUTH_TOKEN)
+    cmds:
+      - docker compose -f .localstack/docker-compose.yml up -d --wait --wait-timeout 180
+      - uv run python tools/localstack/wait.py
+    env: { AWS_ENDPOINT_URL: "{{.LOCALSTACK_ENDPOINT}}" }
+
+  local:down:
+    desc: Stop LocalStack and discard its state (including Terraform state)
+    cmds:
+      - docker compose -f .localstack/docker-compose.yml down -v --remove-orphans
+      - rm -rf {{.TF_DIR}}/.terraform/terraform.tfstate
+
+  local:logs:
+    desc: Save LocalStack logs to .localstack/logs/localstack.log (CI uploads it on failure)
+    cmds:
+      - mkdir -p .localstack/logs
+      - docker compose -f .localstack/docker-compose.yml logs --no-color > .localstack/logs/localstack.log 2>&1 || true
+
+  local:deploy:
+    desc: Plan (with policy checks) and apply everything to LocalStack with tflocal
+    deps: [build]
+    vars: { ENV: local }
+    cmds:
+      - "{{.LOCAL_ENV}} awslocal s3 mb s3://{{.TF_STATE_BUCKET}} 2>/dev/null || true"
+      - task: plan
+        vars: { ENV: local }
+      - cd {{.TF_DIR}} && {{.LOCAL_ENV}} tflocal apply -input=false -auto-approve ../build/plan.local.tfplan
+      - cd {{.TF_DIR}} && {{.LOCAL_ENV}} tflocal output -json > ../build/outputs.local.json
+
+  local:seed:
+    desc: Replay all generator fixtures onto the local ingress bus
+    cmds:
+      - uv run python -m tools.generator --env local --sets valid,duplicates,out_of_order,invalid
+    env:
+      AWS_ENDPOINT_URL: "{{.LOCALSTACK_ENDPOINT}}"
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: "{{.LOCAL_REGION}}"
+      AWS_REGION: "{{.LOCAL_REGION}}"
+
+  test:integration:
+    desc: Integration tests against the deployed LocalStack stacks
+    cmds:
+      - uv run pytest tests/integration -q -m integration -o addopts="" -ra
+    env:
+      TARGET_ENV: local
+      OUTPUTS_FILE: build/outputs.local.json
+      AWS_ENDPOINT_URL: "{{.LOCALSTACK_ENDPOINT}}"
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: "{{.LOCAL_REGION}}"
+      AWS_REGION: "{{.LOCAL_REGION}}"
+
+  query:
+    desc: DuckDB over the local Iceberg archive tables (SQL="..." or FILE=path.sql to run non-interactively)
+    cmds:
+      - uv run python -m tools.query --env local {{if .SQL}}--sql "{{.SQL}}"{{end}} {{if .FILE}}--file "{{.FILE}}"{{end}}
+    env:
+      AWS_ENDPOINT_URL: "{{.LOCALSTACK_ENDPOINT}}"
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: "{{.LOCAL_REGION}}"
+      AWS_REGION: "{{.LOCAL_REGION}}"
+
+  # ---------------------------------------------------------------- AWS
+  deploy:
+    desc: Plan, policy-check and apply to AWS for ENV (task deploy ENV=dev). Uses ambient AWS credentials.
+    deps: [build]
+    preconditions:
+      - sh: 'test "{{.ENV}}" != "local"'
+        msg: "deploy targets AWS; use local:deploy for LocalStack"
+      - sh: 'test -n "$AWS_REGION"'
+        msg: "AWS_REGION must be set"
+      - sh: 'test -n "{{.TF_STATE_BUCKET}}"'
+        msg: "TF_STATE_BUCKET must be set (S3 bucket holding Terraform state)"
+    cmds:
+      - task: plan
+        vars: { ENV: "{{.ENV}}" }
+      - cd {{.TF_DIR}} && terraform apply -input=false -auto-approve ../build/plan.{{.ENV}}.tfplan
+      - cd {{.TF_DIR}} && terraform output -json > ../build/outputs.{{.ENV}}.json
+
+  smoke:
+    desc: Post-deploy smoke test for ENV (task smoke ENV=dev). One synthetic event, asserted in the archive.
+    preconditions:
+      - sh: 'test "{{.ENV}}" != "local"'
+        msg: "smoke targets AWS; integration tests cover local"
+    cmds:
+      - uv run python -m tools.smoke --env {{.ENV}}

@@ -1,0 +1,115 @@
+name: PR checks
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  MISE_EXPERIMENTAL: "1" # npm/pipx backends
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: task setup
+      - run: task lint
+
+  test:
+    name: Unit and contract tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: task setup
+      - run: task test:unit
+      - run: task test:contracts
+
+  integration:
+    name: Integration (fresh LocalStack)
+    runs-on: ubuntu-latest
+    needs: test
+    # Secrets are not available to pull requests from forks; the job is skipped there.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 45
+    env:
+      LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: task setup
+      - name: Start a fresh LocalStack for this run
+        run: task local:up
+      - name: Deploy with tflocal (plan + policy checks + apply)
+        run: task local:deploy
+      - name: Seed the ingress bus with all fixtures
+        run: task local:seed
+      - name: Integration tests
+        run: task test:integration
+      - name: Collect LocalStack logs
+        if: failure()
+        run: task local:logs
+      - name: Upload LocalStack logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: localstack-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .localstack/logs/
+          if-no-files-found: warn
+      - name: Tear down
+        if: always()
+        run: task local:down
+
+  validate:
+    name: Terraform validate
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: task setup
+      - run: task validate
+
+  plan:
+    name: Terraform plan (dev)
+    runs-on: ubuntu-latest
+    needs: validate
+    # Runs only when a read-only plan role is configured and the PR is not from a fork.
+    if: >-
+      vars.AWS_PLAN_ROLE_ARN != '' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: task setup
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: task plan ENV=dev
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev-${{ github.run_id }}
+          path: build/plan.dev.json

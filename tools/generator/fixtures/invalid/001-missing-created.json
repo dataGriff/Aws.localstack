@@ -1,0 +1,5 @@
+{
+  "id": "evt_0300_invalid",
+  "type": "payment.succeeded",
+  "data": {"object": {"id": "pay_0300", "object": "payment", "amount": 100, "currency": "gbp", "status": "succeeded", "invoice": "inv_1300", "customer": "cus_530"}}
+}

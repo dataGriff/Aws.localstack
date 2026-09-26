@@ -1,0 +1,19 @@
+{
+  "id": "evt_0003_valid",
+  "object": "event",
+  "type": "payment.succeeded",
+  "api_version": "2024-06-01",
+  "created": 1758844920,
+  "data": {
+    "object": {
+      "id": "pay_0003",
+      "object": "payment",
+      "amount": 999,
+      "currency": "usd",
+      "status": "succeeded",
+      "invoice": "inv_1003",
+      "customer": "cus_503",
+      "description": "Fixture payment"
+    }
+  }
+}

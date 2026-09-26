@@ -1,0 +1,6 @@
+*
+!build/requirements-writer.txt
+!src/
+!src/**
+src/**/__pycache__
+src/**/*.pyc

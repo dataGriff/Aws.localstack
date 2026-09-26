@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.event-platform.local/schemas/thirdparty/payment.succeeded.schema.json",
+  "title": "PaymentSucceededWebhook",
+  "description": "Placeholder third-party payment provider webhook for a successful payment. Provider-owned shape; extra fields are allowed and passed through untouched on the ingress bus.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^evt_[A-Za-z0-9_]+$",
+      "description": "Provider event id. Unique per webhook delivery attempt set; used for deduplication."
+    },
+    "type": {
+      "type": "string",
+      "const": "payment.succeeded"
+    },
+    "created": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix epoch seconds when the provider created the event."
+    },
+    "api_version": {
+      "type": "string"
+    },
+    "synthetic": {
+      "type": "boolean",
+      "description": "Set only by the smoke-test generator. Not part of the provider contract but tolerated."
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "object": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^pay_[A-Za-z0-9_]+$"
+            },
+            "object": {
+              "type": "string",
+              "const": "payment"
+            },
+            "amount": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Amount in minor currency units."
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[a-z]{3}$"
+            },
+            "status": {
+              "type": "string",
+              "const": "succeeded"
+            },
+            "invoice": {
+              "type": "string",
+              "pattern": "^inv_[A-Za-z0-9_]+$"
+            },
+            "customer": {
+              "type": "string",
+              "pattern": "^cus_[A-Za-z0-9_]+$"
+            }
+          },
+          "required": ["id", "object", "amount", "currency", "status", "invoice", "customer"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["object"],
+      "additionalProperties": true
+    }
+  },
+  "required": ["id", "type", "created", "data"],
+  "additionalProperties": true
+}
