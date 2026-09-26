@@ -1,0 +1,51 @@
+name: Deploy to an environment
+
+# Reusable: adding staging or prod means one more job in deploy.yml plus a GitHub environment
+# with its protection rules and variables. Nothing here changes. The caller owns the
+# per-environment concurrency group so two deploys to one environment never overlap.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment name (also the CDK -c env value)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  MISE_EXPERIMENTAL: "1"
+
+jobs:
+  deploy:
+    name: Deploy and smoke (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 60
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      OWNER: ${{ vars.OWNER || 'platform-team' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: task setup
+      - name: Assume the deploy role (OIDC, no long-lived keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-${{ inputs.environment }}-${{ github.run_id }}
+      - name: Deploy
+        run: task deploy ENV=${{ inputs.environment }}
+      - name: Smoke test
+        run: task smoke ENV=${{ inputs.environment }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stack-outputs-${{ inputs.environment }}-${{ github.run_id }}
+          path: build/outputs.${{ inputs.environment }}.json
+          if-no-files-found: ignore

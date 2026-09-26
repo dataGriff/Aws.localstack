@@ -1,0 +1,40 @@
+name: Main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  checks:
+    name: Full PR pipeline
+    uses: ./.github/workflows/pr.yml
+    secrets: inherit
+
+  deploy-dev:
+    name: dev
+    needs: checks
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+    uses: ./.github/workflows/deploy-env.yml
+    with:
+      environment: dev
+    secrets: inherit
+
+  # To add more environments, append jobs like this one and create the GitHub environment
+  # with its protection rules (required reviewers) and variables. See docs/ci-setup.md.
+  #
+  # deploy-staging:
+  #   name: staging
+  #   needs: deploy-dev
+  #   concurrency:
+  #     group: deploy-staging
+  #     cancel-in-progress: false
+  #   uses: ./.github/workflows/deploy-env.yml
+  #   with:
+  #     environment: staging
+  #   secrets: inherit

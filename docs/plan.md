@@ -1,6 +1,6 @@
 # Implementation plan: event-driven ingestion, commands, and Iceberg archive
 
-Status: **approved** (REST catalog everywhere; defaults for all other open questions).
+Status: **approved and implemented** (REST catalog everywhere; defaults for all other open questions). See README.md for the as-built description; this file records the design and decisions.
 
 ## 1. Architecture summary
 
