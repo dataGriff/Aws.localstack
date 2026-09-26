@@ -1,0 +1,114 @@
+asyncapi: 3.0.0
+id: urn:event-platform
+info:
+  title: Event Platform contracts
+  version: 1.0.0
+  description: |
+    Source of truth for every message that crosses the ingress and domain event buses.
+
+    * The **ingress bus** carries third-party webhook payloads unchanged in EventBridge `detail`.
+    * The **domain bus** carries the shared envelope in `detail`; `detail-type` equals the envelope
+      `type` and `source` is the stable producing service name.
+
+    Contracts are never changed to make a test pass. If a contract looks wrong, raise it.
+defaultContentType: application/json
+
+servers:
+  eventbridge:
+    host: events.amazonaws.com
+    protocol: aws-eventbridge
+    description: Amazon EventBridge (LocalStack locally). Bus names are supplied per environment.
+
+channels:
+  ingressBus:
+    address: "{ingressBusName}"
+    title: Ingress event bus
+    description: Raw third-party events. EventBridge `source` is `<service>.thirdparty.<provider>` and `detail-type` is the provider event type.
+    parameters:
+      ingressBusName:
+        description: Environment-specific EventBridge bus name.
+    messages:
+      paymentSucceeded:
+        $ref: "#/components/messages/paymentSucceeded"
+
+  domainBus:
+    address: "{domainBusName}"
+    title: Domain event bus
+    description: Domain events and commands wrapped in the shared envelope. Rules route on `detail.kind` and `detail.type`.
+    parameters:
+      domainBusName:
+        description: Environment-specific EventBridge bus name.
+    messages:
+      paymentReceived:
+        $ref: "#/components/messages/paymentReceived"
+      reconcileInvoice:
+        $ref: "#/components/messages/reconcileInvoice"
+
+operations:
+  receivePaymentSucceeded:
+    action: receive
+    channel:
+      $ref: "#/channels/ingressBus"
+    summary: Translator consumes provider payment.succeeded webhooks.
+    messages:
+      - $ref: "#/channels/ingressBus/messages/paymentSucceeded"
+
+  publishPaymentReceived:
+    action: send
+    channel:
+      $ref: "#/channels/domainBus"
+    summary: Translator publishes the PaymentReceived domain event.
+    messages:
+      - $ref: "#/channels/domainBus/messages/paymentReceived"
+
+  publishReconcileInvoice:
+    action: send
+    channel:
+      $ref: "#/channels/domainBus"
+    summary: Translator publishes the ReconcileInvoice command.
+    messages:
+      - $ref: "#/channels/domainBus/messages/reconcileInvoice"
+
+  handleReconcileInvoice:
+    action: receive
+    channel:
+      $ref: "#/channels/domainBus"
+    summary: The reconcile-invoice handler consumes ReconcileInvoice commands via its SQS queue.
+    messages:
+      - $ref: "#/channels/domainBus/messages/reconcileInvoice"
+
+components:
+  messages:
+    paymentSucceeded:
+      name: payment.succeeded
+      title: Third-party payment.succeeded webhook
+      summary: Provider webhook delivered unchanged on the ingress bus.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-2020-12
+        schema:
+          $ref: "./schemas/thirdparty/payment.succeeded.schema.json"
+
+    paymentReceived:
+      name: PaymentReceived
+      title: PaymentReceived domain event
+      summary: Envelope with kind=event, type=PaymentReceived.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-2020-12
+        schema:
+          $ref: "./schemas/events/PaymentReceived.schema.json"
+
+    reconcileInvoice:
+      name: ReconcileInvoice
+      title: ReconcileInvoice command
+      summary: Envelope with kind=command, type=ReconcileInvoice.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-2020-12
+        schema:
+          $ref: "./schemas/commands/ReconcileInvoice.schema.json"
+
+  schemas:
+    envelope:
+      $ref: "./schemas/envelope.schema.json"

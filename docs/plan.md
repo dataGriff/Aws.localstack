@@ -1,6 +1,6 @@
 # Implementation plan: event-driven ingestion, commands, and Iceberg archive
 
-Status: **awaiting approval**. No application code has been written yet.
+Status: **approved** (REST catalog everywhere; defaults for all other open questions).
 
 ## 1. Architecture summary
 
@@ -23,10 +23,11 @@ Status: **awaiting approval**. No application code has been written yet.
                   unparseable → quarantine S3 prefix
                                    ▼
                   Iceberg: archive.ingress_events / archive.domain_events, partition day(event_time)
-                  AWS: S3 Tables REST catalog  |  local + CI: PyIceberg SqlCatalog (SQLite) + LocalStack S3
+                  Everywhere: PyIceberg RestCatalog. AWS: S3 Tables Iceberg REST endpoint.
+                  Local + CI: LocalStack's S3 Tables Iceberg REST endpoint (same code, different env vars).
 ```
 
-Catalog selection is by environment variables only (`ICEBERG_CATALOG_TYPE=rest|sql`, plus URI / warehouse / SigV4 settings). The writer code path is identical in every environment.
+Catalog configuration is by environment variables only (REST URI, warehouse ARN, SigV4 flag, optional S3 endpoint). The writer code path is identical in every environment.
 
 ## 2. Repository layout
 
@@ -66,9 +67,9 @@ Catalog selection is by environment variables only (`ICEBERG_CATALOG_TYPE=rest|s
 │   │   ├── archive_writer/        # Dockerfile + app.py + writer.py (parse/group/arrow/append/retry)
 │   │   └── table_setup/app.py     # CDK custom resource handler: idempotent namespace + table creation
 │   └── iceberg/
-│       ├── catalog.py             # load_catalog() from env vars only (rest | sql)
+│       ├── catalog.py             # load_catalog() from env vars only (REST)
 │       ├── schema.py              # the archive table schema + partition spec (single definition)
-│       └── setup.py               # ensure_tables(catalog) shared by custom resource and `task local:tables`
+│       └── setup.py               # ensure_tables(catalog) used by the custom resource
 ├── infra/                         # AWS CDK (Python)
 │   ├── app.py                     # composes stacks per environment from cdk.json context
 │   ├── cdk.json
@@ -106,8 +107,8 @@ Catalog selection is by environment variables only (`ICEBERG_CATALOG_TYPE=rest|s
 | Archive ESM | Batch size and batching window from CDK context (defaults 500 / 60s), `MaximumConcurrency=2`, `ReportBatchItemFailures`, queue visibility timeout = 6× Lambda timeout. |
 | Archive writer | Container image (`public.ecr.aws/lambda/python:3.12` base) with PyIceberg + PyArrow. Groups records by bus → one Arrow table → one `append()` per table per batch. `CommitFailedException` retried with exponential backoff and jitter; after exhaustion the whole batch is reported failed (safe: append is atomic per table). Records that fail to parse go to quarantine and are acknowledged. |
 | Table schema | `event_id string, bus string, source string, detail_type string, kind string, type string, correlation_id string, schema_version string, event_time timestamptz, ingested_at timestamptz, detail string`. Partition spec `day(event_time)`. Two tables: `archive.ingress_events`, `archive.domain_events`. |
-| Table creation | `ensure_tables()` is shared. In AWS it runs inside a CDK custom resource (Provider framework, image-based Lambda sharing the writer image). Locally, `task local:tables` calls it directly. |
-| Catalog | AWS: PyIceberg `RestCatalog` against S3 Tables' Iceberg REST endpoint with SigV4. Local/CI: `SqlCatalog` (SQLite file under `.localstack/catalog.db`) with warehouse `s3://<bucket>` on LocalStack. Compaction / snapshot expiry: S3 Tables maintenance in AWS, none locally (documented). |
+| Table creation | `ensure_tables()` runs inside a CDK custom resource (Provider framework, a second handler in the writer's container image). The same custom resource runs under `cdklocal`, so there is one code path everywhere. |
+| Catalog | PyIceberg `RestCatalog` everywhere. AWS: S3 Tables' Iceberg REST endpoint with SigV4 (signing name `s3tables`). Local/CI: LocalStack's S3 Tables Iceberg REST endpoint, plus an `s3.endpoint` override so data files go to LocalStack S3. Compaction / snapshot expiry: S3 Tables maintenance in AWS, none locally (documented). |
 | IAM | Per-function roles with explicit actions on explicit ARNs. Only unavoidable wildcards: `xray:PutTraceSegments` / `PutTelemetryRecords` (resource `*` required by the service) and S3 object-level `arn:.../*` under a specific bucket prefix. |
 | Security | SSE-KMS or SSE-S3 (open question 5) on buckets; SQS SSE; DynamoDB encryption; bucket policy denying non-TLS; block public access. |
 | Observability | Powertools Logger (JSON, correlation id from envelope), Tracer on every function, log retention from config, alarms on every DLQ `ApproximateNumberOfMessagesVisible > 0` and on writer `Errors`. |
@@ -125,10 +126,10 @@ Each milestone ends with `task lint test:unit test:contracts` green (and integra
 
 ## 5. Open questions
 
-Please answer or say "use your default" for each. Defaults are what I will do if you approve without comment.
+Approved with defaults on 2026-09-26. Kept for the record.
 
 1. **No Docker in this session.** The cloud container I am working in has no Docker daemon, so I cannot run LocalStack or build the writer image here. I will write and unit-test everything, and write the integration tests and Taskfile targets carefully, but the first real LocalStack run will be in your GitHub Actions PR pipeline or on your machine. Are you OK with that, and does the repo have `LOCALSTACK_AUTH_TOKEN` set as a secret already?
-2. **S3 Tables in LocalStack.** LocalStack does not emulate S3 Tables' Iceberg REST endpoint; that is why the brief specifies `SqlCatalog` locally. The consequence is that the CDK custom resource that creates tables via the REST catalog is not exercised locally; locally `task local:tables` runs the same `ensure_tables()` function against `SqlCatalog`. Confirm this split is acceptable.
+2. **S3 Tables in LocalStack.** Resolved: LocalStack emulates S3 Tables including an Iceberg REST endpoint, so the REST catalog is used everywhere and `SqlCatalog` is dropped. Decision: switch to REST everywhere (approved).
 3. **Dependency manager.** Default: `uv` (managed by mise) with `pyproject.toml` + `uv.lock`; Lambda zips built from a locked export. Alternative: plain pip + `requirements.txt`.
 4. **Packaging of shared code.** Default: CDK `PythonFunction`-style bundling via Docker is unavailable in CI-less-Docker contexts, so I will bundle zips with a Taskfile step (`uv pip install --target`) and point CDK at the built directories. The archive writer is the only container image. Say if you prefer `aws-cdk.aws-lambda-python-alpha` instead (it needs Docker for every function).
 5. **Encryption keys.** Default: AWS-managed keys (SSE-S3, SQS-managed SSE, DynamoDB default). Customer-managed KMS keys add cost and IAM surface; say if you want them.

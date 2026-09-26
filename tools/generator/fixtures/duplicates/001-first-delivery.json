@@ -1,0 +1,19 @@
+{
+  "id": "evt_0100_dup",
+  "object": "event",
+  "type": "payment.succeeded",
+  "api_version": "2024-06-01",
+  "created": 1758845000,
+  "data": {
+    "object": {
+      "id": "pay_0100",
+      "object": "payment",
+      "amount": 2500,
+      "currency": "gbp",
+      "status": "succeeded",
+      "invoice": "inv_1100",
+      "customer": "cus_510",
+      "description": "Fixture payment"
+    }
+  }
+}

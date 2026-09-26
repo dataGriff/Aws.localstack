@@ -1,0 +1,73 @@
+[project]
+name = "event-platform"
+version = "0.1.0"
+description = "Event-driven ingestion, command routing and Iceberg archive on AWS"
+requires-python = ">=3.12"
+readme = "README.md"
+# Runtime dependencies shared by every zip-packaged Lambda.
+dependencies = [
+  "aws-lambda-powertools[tracer]>=3.35,<4",
+  "boto3>=1.40",
+  "jsonschema>=4.26,<5",
+]
+
+[project.optional-dependencies]
+# Only the archive writer image installs these (PyArrow is too large for a zip).
+iceberg = [
+  "pyiceberg[pyarrow]>=0.12,<0.13",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=9,<10",
+  "ruff>=0.16,<0.17",
+  "mypy>=2,<3",
+  "pyyaml>=6",
+  "types-pyyaml",
+  "types-jsonschema",
+  "duckdb>=1.5,<2",
+  "aws-cdk-lib>=2.271,<3",
+  "constructs>=10.4,<11",
+  "boto3-stubs[essential,events,sqs,dynamodb,s3,cloudformation,s3tables]",
+  "event-platform[iceberg]",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shared", "src/domain", "src/iceberg", "src/functions"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+markers = [
+  "integration: requires a deployed LocalStack stack (run via `task test:integration`)",
+]
+addopts = "-ra --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning:botocore.*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests", "tools", "infra"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "C4", "PL", "T20"]
+ignore = ["PLR2004", "PLR0913"]
+
+[tool.ruff.lint.per-file-ignores]
+"tools/**" = ["T20"]
+"tests/**" = ["PLR0913"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["shared", "domain", "iceberg", "functions"]
+strict = true
+warn_unused_ignores = false
+ignore_missing_imports = true

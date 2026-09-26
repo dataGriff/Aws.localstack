@@ -1,0 +1,15 @@
+# Tool versions for this repository. Install mise (https://mise.jdx.dev) and run `mise install`.
+[tools]
+python = "3.12"
+node = "22"
+uv = "0.8"
+task = "3.53"
+awscli = "2"
+duckdb = "1.5"
+"pipx:awscli-local" = "0.22"
+"npm:aws-cdk" = "2.1143.0"
+"npm:aws-cdk-local" = "3.0.4"
+"npm:@asyncapi/cli" = "4"
+
+[env]
+UV_PYTHON = "3.12"

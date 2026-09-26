@@ -1,0 +1,143 @@
+# https://taskfile.dev — every developer and CI command lives here.
+version: "3"
+
+dotenv: [".env"]
+
+vars:
+  ENV: '{{.ENV | default "local"}}'
+  PROJECT: event-platform
+  FUNCTIONS_ZIP: translator reconcile_invoice
+  LOCALSTACK_ENDPOINT: '{{.LOCALSTACK_ENDPOINT | default "http://localhost.localstack.cloud:4566"}}'
+  CDK: '{{if eq .ENV "local"}}cdklocal{{else}}cdk{{end}}'
+  CDK_ARGS: "--app 'uv run python infra/app.py' -c env={{.ENV}}"
+
+env:
+  UV_PYTHON: "3.12"
+  # Every local-only command talks to LocalStack through these. Deploy/smoke/diff override them.
+  AWS_ENDPOINT_URL: '{{if eq .ENV "local"}}{{.LOCALSTACK_ENDPOINT}}{{else}}{{.AWS_ENDPOINT_URL}}{{end}}'
+  AWS_ACCESS_KEY_ID: '{{if eq .ENV "local"}}test{{else}}{{.AWS_ACCESS_KEY_ID}}{{end}}'
+  AWS_SECRET_ACCESS_KEY: '{{if eq .ENV "local"}}test{{else}}{{.AWS_SECRET_ACCESS_KEY}}{{end}}'
+  AWS_DEFAULT_REGION: '{{.AWS_REGION | default (.AWS_DEFAULT_REGION | default "eu-west-1")}}'
+  AWS_REGION: '{{.AWS_REGION | default (.AWS_DEFAULT_REGION | default "eu-west-1")}}'
+
+tasks:
+  default:
+    cmds: [task --list]
+    silent: true
+
+  setup:
+    desc: Install Python and Node dependencies (tool versions come from mise)
+    cmds:
+      - uv sync --all-extras
+      - npm ci --no-audit --no-fund
+
+  lint:
+    desc: Ruff (lint + format check) and mypy
+    cmds:
+      - uv run ruff check .
+      - uv run ruff format --check .
+      - uv run mypy
+
+  format:
+    desc: Auto-fix lint issues and format
+    cmds:
+      - uv run ruff format .
+      - uv run ruff check --fix .
+
+  test:unit:
+    desc: Fast unit tests, no emulator
+    cmds:
+      - uv run pytest tests/unit -q
+
+  test:contracts:
+    desc: Validate AsyncAPI documents and every fixture against its schema
+    env:
+      ASYNCAPI_METRICS: "false"
+    cmds:
+      - npx --no-install asyncapi validate contracts/asyncapi.yaml
+      - uv run pytest tests/contracts -q
+
+  build:
+    desc: Bundle zip-packaged Lambdas into build/ (the archive writer is a container image)
+    cmds:
+      - uv run python tools/build/bundle.py {{.FUNCTIONS_ZIP}}
+    sources:
+      - src/**/*.py
+      - contracts/**/*
+      - pyproject.toml
+      - uv.lock
+      - tools/build/bundle.py
+    generates:
+      - build/**/*
+
+  synth:
+    desc: CDK synth for ENV (default local)
+    deps: [build]
+    cmds:
+      - "{{.CDK}} synth {{.CDK_ARGS}} --quiet"
+
+  diff:
+    desc: CDK diff against the deployed ENV (needs AWS credentials for non-local)
+    deps: [build]
+    cmds:
+      - "{{.CDK}} diff {{.CDK_ARGS}} --all"
+
+  local:up:
+    desc: Start a fresh LocalStack container (needs LOCALSTACK_AUTH_TOKEN)
+    cmds:
+      - docker compose -f .localstack/docker-compose.yml up -d --wait --wait-timeout 180
+      - uv run python tools/localstack/wait.py
+
+  local:down:
+    desc: Stop LocalStack and discard its state
+    cmds:
+      - docker compose -f .localstack/docker-compose.yml down -v --remove-orphans
+
+  local:logs:
+    desc: Save LocalStack logs to .localstack/logs/localstack.log (uploaded by CI on failure)
+    cmds:
+      - mkdir -p .localstack/logs
+      - docker compose -f .localstack/docker-compose.yml logs --no-color > .localstack/logs/localstack.log 2>&1 || true
+
+  local:deploy:
+    desc: Bootstrap and deploy all stacks to LocalStack with cdklocal
+    deps: [build]
+    vars: { ENV: local }
+    cmds:
+      - cdklocal bootstrap --app 'uv run python infra/app.py' -c env=local
+      - cdklocal deploy --app 'uv run python infra/app.py' -c env=local --all --require-approval never --outputs-file build/outputs.local.json
+
+  local:seed:
+    desc: Replay all generator fixtures onto the local ingress bus
+    cmds:
+      - uv run python -m tools.generator --env local --sets valid,duplicates,out_of_order,invalid
+
+  test:integration:
+    desc: Integration tests against the deployed LocalStack stacks
+    cmds:
+      - uv run pytest tests/integration -q -m integration --timeout-method=thread -o addopts="" -ra
+    env:
+      TARGET_ENV: local
+      OUTPUTS_FILE: build/outputs.local.json
+
+  query:
+    desc: Open DuckDB over the local Iceberg archive tables (SQL= or FILE= to run non-interactively)
+    cmds:
+      - uv run python -m tools.query --env {{.ENV}} {{if .SQL}}--sql "{{.SQL}}"{{end}} {{if .FILE}}--file "{{.FILE}}"{{end}}
+
+  deploy:
+    desc: Deploy all stacks to AWS for ENV (e.g. task deploy ENV=dev). Uses ambient AWS credentials.
+    deps: [build]
+    preconditions:
+      - sh: 'test "{{.ENV}}" != "local"'
+        msg: "deploy targets AWS; use local:deploy for LocalStack"
+    cmds:
+      - cdk deploy --app 'uv run python infra/app.py' -c env={{.ENV}} --all --require-approval never --outputs-file build/outputs.{{.ENV}}.json
+
+  smoke:
+    desc: Post-deploy smoke test for ENV (sends one synthetic event and waits for it in the archive)
+    preconditions:
+      - sh: 'test "{{.ENV}}" != "local"'
+        msg: "smoke targets AWS; integration tests cover local"
+    cmds:
+      - uv run python -m tools.smoke --env {{.ENV}}

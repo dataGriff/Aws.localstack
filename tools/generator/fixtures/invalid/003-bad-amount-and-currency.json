@@ -1,0 +1,6 @@
+{
+  "id": "evt_0302_invalid",
+  "type": "payment.succeeded",
+  "created": 1758845500,
+  "data": {"object": {"id": "pay_0302", "object": "payment", "amount": "12.50", "currency": "GBP", "status": "succeeded", "invoice": "inv_1302", "customer": "cus_532"}}
+}

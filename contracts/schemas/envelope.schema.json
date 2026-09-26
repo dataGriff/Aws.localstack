@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.event-platform.local/schemas/envelope.schema.json",
+  "title": "Envelope",
+  "description": "Shared envelope carried in EventBridge `detail` for every message on the domain bus. EventBridge `detail-type` equals `type` and `source` is the stable producing service name.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique message id (UUID v4). Consumers deduplicate on this."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["event", "command"],
+      "description": "Whether the message states a fact (event) or requests work (command)."
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]+$",
+      "description": "Message type name, e.g. PaymentReceived or ReconcileInvoice."
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Version of the data schema for this type."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the underlying business fact occurred (UTC, RFC 3339)."
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Shared by every message produced while handling one inbound third-party event."
+    },
+    "causationId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Id of the message or event that directly caused this one."
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The third-party event id this message was derived from."
+    },
+    "synthetic": {
+      "type": "boolean",
+      "default": false,
+      "description": "True for smoke-test traffic. Consumers must treat it as non-production data."
+    },
+    "data": {
+      "type": "object",
+      "description": "Type-specific payload. Constrained by the per-type schema."
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "type",
+    "schemaVersion",
+    "occurredAt",
+    "correlationId",
+    "causationId",
+    "source",
+    "data"
+  ],
+  "additionalProperties": false
+}
