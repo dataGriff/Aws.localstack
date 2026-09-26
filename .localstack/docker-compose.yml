@@ -1,5 +1,7 @@
 # Fresh LocalStack per `task local:up`; `task local:down` discards all state (-v).
 # S3 Tables, container-image Lambdas and ECR need the licensed image and LOCALSTACK_AUTH_TOKEN.
+# Tag is CalVer (YYYY.MM); the old SemVer `:4` line is frozen at 4.14.0 and fails license
+# activation with exit 55. Bump the month deliberately, not automatically.
 services:
   localstack:
     image: localstack/localstack-pro:2026.08

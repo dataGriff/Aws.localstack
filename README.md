@@ -87,6 +87,28 @@ task local:down                    # stop and discard state
 
 The generator is also a CLI: `uv run python -m tools.generator --env local --sets valid --synthetic`.
 
+### If `localhost.localstack.cloud` does not resolve
+
+LocalStack publishes `*.localhost.localstack.cloud` as public DNS records that all point at
+`127.0.0.1`; the SDKs need real hostnames because AWS addresses services per subdomain, and
+`/etc/hosts` cannot wildcard. Some ISP and corporate resolvers strip those answers as
+DNS-rebinding protection, so `task local:up` fails on `wait.py` with
+`nodename nor servname provided` even though the container is healthy. The container is
+unaffected — it runs its own resolver — so this only breaks host-side tooling.
+
+Pin the three names this repo uses (S3 is path-style, so no per-bucket subdomains):
+
+```sh
+sudo tee -a /etc/hosts >/dev/null <<'HOSTS'
+127.0.0.1	localhost.localstack.cloud
+127.0.0.1	s3.localhost.localstack.cloud
+127.0.0.1	glue.localhost.localstack.cloud
+HOSTS
+```
+
+Setting the machine's resolvers to `1.1.1.1`/`8.8.8.8` also works and needs no upkeep, at the
+cost of overriding DNS for everything else on the network.
+
 ## How local and AWS differ
 
 | Concern | AWS | Local / CI (LocalStack) |
