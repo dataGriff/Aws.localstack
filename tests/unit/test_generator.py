@@ -33,7 +33,8 @@ def test_entries_keep_payload_unchanged_and_route_by_provider_type() -> None:
 
 def test_send_batches_every_set() -> None:
     class Fake:
-        calls: list[int] = []
+        def __init__(self) -> None:
+            self.calls: list[int] = []
 
         def put_events(self, *, Entries: Any) -> dict[str, Any]:  # noqa: N803
             self.calls.append(len(Entries))
