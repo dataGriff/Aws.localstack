@@ -12,7 +12,7 @@ from tools.common import stack_outputs
 
 
 def configure_env_from_outputs(env_name: str) -> None:
-    """Populate ICEBERG_* from the CDK outputs unless already set by the caller."""
+    """Populate ICEBERG_* from the Terraform outputs unless already set by the caller."""
     outputs = stack_outputs(env_name)
     mapping = {
         "ICEBERG_REST_URI": "IcebergRestUri",

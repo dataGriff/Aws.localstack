@@ -1,0 +1,15 @@
+variable "name_prefix" { type = string }
+variable "service_name" { type = string }
+variable "environment" { type = string }
+variable "is_local" { type = bool }
+variable "build_dir" { type = string }
+variable "ingress_bus_name" { type = string }
+variable "domain_bus_name" { type = string }
+variable "domain_bus_arn" { type = string }
+variable "alarm_topic_arn" { type = string }
+variable "timeout_seconds" { type = number }
+variable "max_receive_count" { type = number }
+variable "rule_retry_attempts" { type = number }
+variable "rule_max_event_age_seconds" { type = number }
+variable "idempotency_ttl_seconds" { type = number }
+variable "log_retention_days" { type = number }

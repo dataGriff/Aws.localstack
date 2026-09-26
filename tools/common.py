@@ -16,19 +16,26 @@ def outputs_file(env_name: str) -> Path:
 
 
 def stack_outputs(env_name: str) -> dict[str, str]:
-    """Merged CloudFormation outputs written by `cdk deploy --outputs-file`. Keys are unique."""
+    """Flattened `terraform output -json` written by `task deploy` / `task local:deploy`.
+
+    Scalar outputs keep their name. The `Commands` map is flattened per command type, e.g.
+    Commands.ReconcileInvoice.QueueUrl -> ReconcileInvoiceQueueUrl.
+    """
     path = outputs_file(env_name)
     if not path.exists():
         raise FileNotFoundError(f"{path} not found; run `task local:deploy` or `task deploy ENV=…`")
     with path.open(encoding="utf-8") as fh:
-        data: dict[str, dict[str, str]] = json.load(fh)
-    merged: dict[str, str] = {}
-    for stack, values in data.items():
-        for key, value in values.items():
-            if key in merged and merged[key] != value:
-                raise ValueError(f"duplicate output key {key} in {stack}")
-            merged[key] = value
-    return merged
+        data: dict[str, dict[str, Any]] = json.load(fh)
+    flat: dict[str, str] = {}
+    for key, entry in data.items():
+        value = entry.get("value") if isinstance(entry, dict) and "value" in entry else entry
+        if isinstance(value, dict):
+            for command, fields in value.items():
+                for field, field_value in fields.items():
+                    flat[f"{command}{field}"] = str(field_value)
+        elif value is not None:
+            flat[key] = str(value)
+    return flat
 
 
 def output(env_name: str, key: str) -> str:

@@ -5,10 +5,18 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 build/
-cdk.out/
 node_modules/
 .localstack/volume/
 .localstack/logs/
 .env
 *.egg-info/
 .coverage
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl
+crash.log
+.task/

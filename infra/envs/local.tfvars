@@ -1,0 +1,17 @@
+environment                     = "local"
+is_local                        = true
+log_retention_days              = 1
+translator_timeout_seconds      = 20
+handler_timeout_seconds         = 5
+max_receive_count               = 3
+rule_retry_attempts             = 3
+rule_max_event_age_seconds      = 300
+archive_batch_size              = 200
+archive_batching_window_seconds = 5
+archive_writer_timeout_seconds  = 60
+archive_max_concurrency         = 2
+idempotency_ttl_seconds         = 3600
+iceberg_rest_uri                = "http://glue.localhost.localstack.cloud:4566/iceberg"
+iceberg_warehouse               = "000000000000:s3tablescatalog/event-platform-local-archive"
+iceberg_sigv4                   = false
+iceberg_s3_endpoint             = "http://s3.localhost.localstack.cloud:4566"

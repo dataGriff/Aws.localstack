@@ -1,8 +1,8 @@
 """Registry of third-party event types, mappers and command handlers.
 
-Both the runtime (translator, handlers) and the CDK app read this module, so adding a command
+Both the runtime (translator, handlers) and Terraform (via build/registry.json) read this, so adding a command
 means: a mapper, a handler module, a contract, and one entry here. Keep module-level imports to
-the standard library so CDK can import it without the Lambda runtime dependencies.
+the standard library so the build tooling can import it without the Lambda runtime dependencies.
 """
 
 from __future__ import annotations

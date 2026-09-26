@@ -52,7 +52,7 @@ jobs:
       - run: task setup
       - name: Start a fresh LocalStack for this run
         run: task local:up
-      - name: Deploy with cdklocal
+      - name: Deploy with tflocal (plan + policy checks + apply)
         run: task local:deploy
       - name: Seed the ingress bus with all fixtures
         run: task local:seed
@@ -72,8 +72,8 @@ jobs:
         if: always()
         run: task local:down
 
-  synth:
-    name: CDK synth (dev)
+  validate:
+    name: Terraform validate
     runs-on: ubuntu-latest
     needs: lint
     steps:
@@ -82,21 +82,15 @@ jobs:
         with:
           cache: true
       - run: task setup
-      - run: task synth ENV=dev
-        env:
-          AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cdk-out-dev-${{ github.run_id }}
-          path: cdk.out/*.template.json
+      - run: task validate
 
-  diff:
-    name: CDK diff (dev)
+  plan:
+    name: Terraform plan (dev)
     runs-on: ubuntu-latest
-    needs: synth
-    # Runs only when a read-only diff role is configured and the PR is not from a fork.
+    needs: validate
+    # Runs only when a read-only plan role is configured and the PR is not from a fork.
     if: >-
-      vars.AWS_DIFF_ROLE_ARN != '' &&
+      vars.AWS_PLAN_ROLE_ARN != '' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     permissions:
       contents: read
@@ -109,8 +103,13 @@ jobs:
       - run: task setup
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DIFF_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - run: task diff ENV=dev
+      - run: task plan ENV=dev
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev-${{ github.run_id }}
+          path: build/plan.dev.json

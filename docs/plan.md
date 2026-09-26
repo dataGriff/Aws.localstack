@@ -1,6 +1,6 @@
 # Implementation plan: event-driven ingestion, commands, and Iceberg archive
 
-Status: **approved and implemented** (REST catalog everywhere; defaults for all other open questions). See README.md for the as-built description; this file records the design and decisions.
+Status: **approved and implemented** (REST catalog everywhere; defaults for all other open questions). **Change after delivery:** infrastructure was rewritten from AWS CDK to Terraform at the owner's request; `infra/` now holds Terraform modules and `tflocal` replaces `cdklocal`. References to CDK below are historical. See README.md for the as-built description.
 
 ## 1. Architecture summary
 

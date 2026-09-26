@@ -1,10 +1,8 @@
 {
   "name": "event-platform-tooling",
   "private": true,
-  "description": "Node tooling pinned for CI parity (mise installs the same versions for developers)",
+  "description": "Node tooling pinned for CI parity (mise installs the same version for developers)",
   "devDependencies": {
-    "@asyncapi/cli": "^4.0.0",
-    "aws-cdk": "2.1143.0",
-    "aws-cdk-local": "3.0.4"
+    "@asyncapi/cli": "^4.0.0"
   }
 }

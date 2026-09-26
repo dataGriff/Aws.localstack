@@ -1,4 +1,4 @@
-"""Idempotent namespace and table creation. Used by the CDK custom resource (all environments)."""
+"""Idempotent namespace and table creation. Run by the table-setup Lambda that Terraform invokes on every apply (all environments)."""
 
 from __future__ import annotations
 

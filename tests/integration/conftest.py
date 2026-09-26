@@ -1,6 +1,6 @@
 """Fixtures for integration tests against the deployed LocalStack stacks.
 
-Resource names come from the CDK outputs file (OUTPUTS_FILE / build/outputs.local.json).
+Resource names come from the Terraform outputs file (OUTPUTS_FILE / build/outputs.local.json).
 boto3 picks up AWS_ENDPOINT_URL from the environment (set by the Taskfile).
 """
 

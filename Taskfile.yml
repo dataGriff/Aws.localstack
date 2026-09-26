@@ -8,12 +8,20 @@ vars:
   FUNCTIONS_ZIP: translator reconcile_invoice
   LOCALSTACK_ENDPOINT: "http://localhost.localstack.cloud:4566"
   LOCAL_REGION: "eu-west-1"
-  APP: "--app 'uv run python infra/app.py'"
+  TF_DIR: infra
+  # Terraform for AWS, terraform-local (tflocal) for LocalStack. Same code, same backend type.
+  TF: '{{if eq .ENV "local"}}tflocal{{else}}terraform{{end}}'
+  TF_STATE_BUCKET: '{{if eq .ENV "local"}}event-platform-tfstate-local{{else}}{{.TF_STATE_BUCKET | default ""}}{{end}}'
+  REGION: '{{if eq .ENV "local"}}{{.LOCAL_REGION}}{{else}}{{.AWS_REGION | default ""}}{{end}}'
+  # LocalStack-only credentials/endpoint, prefixed to Terraform commands so nothing leaks into
+  # AWS deploys (which rely on ambient credentials and AWS_REGION).
+  LOCAL_ENV: '{{if eq .ENV "local"}}env AWS_ENDPOINT_URL={{.LOCALSTACK_ENDPOINT}} AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION={{.LOCAL_REGION}} AWS_DEFAULT_REGION={{.LOCAL_REGION}}{{end}}'
 
 env:
   UV_PYTHON: "3.12"
-  CDK_DISABLE_CLI_TELEMETRY: "true"
   ASYNCAPI_METRICS: "false"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
 
 tasks:
   default:
@@ -27,20 +35,22 @@ tasks:
       - npm ci --no-audit --no-fund
 
   lint:
-    desc: Ruff (lint + format check) and mypy
+    desc: Ruff (lint + format check), mypy, terraform fmt
     cmds:
       - uv run ruff check .
       - uv run ruff format --check .
       - uv run mypy
+      - terraform fmt -check -recursive {{.TF_DIR}}
 
   format:
-    desc: Auto-fix lint issues and format
+    desc: Auto-fix lint issues and format (Python and Terraform)
     cmds:
       - uv run ruff format .
       - uv run ruff check --fix .
+      - terraform fmt -recursive {{.TF_DIR}}
 
   test:unit:
-    desc: Fast unit tests, no emulator (includes CDK template guard rails)
+    desc: Fast unit tests, no emulator
     cmds:
       - uv run pytest tests/unit -q
 
@@ -51,7 +61,7 @@ tasks:
       - uv run pytest tests/contracts -q
 
   build:
-    desc: Bundle zip Lambdas into build/ and export the writer image requirements
+    desc: Bundle zip Lambdas, export the writer image requirements and the domain registry
     cmds:
       - uv run python tools/build/bundle.py {{.FUNCTIONS_ZIP}}
     sources:
@@ -63,17 +73,42 @@ tasks:
     generates:
       - build/**/*
 
-  synth:
-    desc: CDK synth for ENV (default local; no credentials needed)
+  validate:
+    desc: terraform init (no backend) + validate. Needs no credentials.
     deps: [build]
+    dir: "{{.TF_DIR}}"
     cmds:
-      - npx --no-install cdk synth {{.APP}} -c env={{.ENV}} --quiet
+      - terraform init -backend=false -input=false
+      - terraform validate
 
-  diff:
-    desc: CDK diff against the deployed ENV (needs AWS credentials)
+  # Internal: backend init for ENV. AWS needs TF_STATE_BUCKET and AWS_REGION in the environment.
+  tf:init:
+    internal: true
+    dir: "{{.TF_DIR}}"
+    cmds:
+      - >-
+        {{.LOCAL_ENV}} {{.TF}} init -reconfigure -input=false
+        -backend-config="bucket={{.TF_STATE_BUCKET}}"
+        -backend-config="key=event-platform/{{.ENV}}.tfstate"
+        -backend-config="region={{.REGION}}"
+        -backend-config="use_lockfile=true"
+
+  plan:
+    desc: Terraform plan for ENV (task plan ENV=dev) and run the policy checks on it
     deps: [build]
     cmds:
-      - npx --no-install cdk diff {{.APP}} -c env={{.ENV}} --all
+      - task: tf:init
+        vars: { ENV: "{{.ENV}}" }
+      - >-
+        cd {{.TF_DIR}} && {{.LOCAL_ENV}} {{.TF}} plan -input=false -var-file=envs/{{.ENV}}.tfvars
+        -out=../build/plan.{{.ENV}}.tfplan
+      - cd {{.TF_DIR}} && {{.LOCAL_ENV}} {{.TF}} show -json ../build/plan.{{.ENV}}.tfplan > ../build/plan.{{.ENV}}.json
+      - uv run python tools/build/policy_check.py build/plan.{{.ENV}}.json
+
+  policy:check:
+    desc: Guard rails over an existing plan JSON (build/plan.ENV.json)
+    cmds:
+      - uv run python tools/build/policy_check.py build/plan.{{.ENV}}.json
 
   # ---------------------------------------------------------------- LocalStack
   local:up:
@@ -84,9 +119,10 @@ tasks:
     env: { AWS_ENDPOINT_URL: "{{.LOCALSTACK_ENDPOINT}}" }
 
   local:down:
-    desc: Stop LocalStack and discard its state
+    desc: Stop LocalStack and discard its state (including Terraform state)
     cmds:
       - docker compose -f .localstack/docker-compose.yml down -v --remove-orphans
+      - rm -rf {{.TF_DIR}}/.terraform/terraform.tfstate
 
   local:logs:
     desc: Save LocalStack logs to .localstack/logs/localstack.log (CI uploads it on failure)
@@ -95,18 +131,15 @@ tasks:
       - docker compose -f .localstack/docker-compose.yml logs --no-color > .localstack/logs/localstack.log 2>&1 || true
 
   local:deploy:
-    desc: Bootstrap and deploy all stacks to LocalStack with cdklocal
+    desc: Plan (with policy checks) and apply everything to LocalStack with tflocal
     deps: [build]
+    vars: { ENV: local }
     cmds:
-      - npx --no-install cdklocal bootstrap {{.APP}} -c env=local
-      - npx --no-install cdklocal deploy {{.APP}} -c env=local --all --require-approval never --outputs-file build/outputs.local.json
-    env:
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
-      AWS_DEFAULT_REGION: "{{.LOCAL_REGION}}"
-      AWS_REGION: "{{.LOCAL_REGION}}"
-      CDK_DEFAULT_ACCOUNT: "000000000000"
-      CDK_DEFAULT_REGION: "{{.LOCAL_REGION}}"
+      - "{{.LOCAL_ENV}} awslocal s3 mb s3://{{.TF_STATE_BUCKET}} 2>/dev/null || true"
+      - task: plan
+        vars: { ENV: local }
+      - cd {{.TF_DIR}} && {{.LOCAL_ENV}} tflocal apply -input=false -auto-approve ../build/plan.local.tfplan
+      - cd {{.TF_DIR}} && {{.LOCAL_ENV}} tflocal output -json > ../build/outputs.local.json
 
   local:seed:
     desc: Replay all generator fixtures onto the local ingress bus
@@ -145,15 +178,20 @@ tasks:
 
   # ---------------------------------------------------------------- AWS
   deploy:
-    desc: Deploy all stacks to AWS for ENV (task deploy ENV=dev). Uses ambient AWS credentials.
+    desc: Plan, policy-check and apply to AWS for ENV (task deploy ENV=dev). Uses ambient AWS credentials.
     deps: [build]
     preconditions:
       - sh: 'test "{{.ENV}}" != "local"'
         msg: "deploy targets AWS; use local:deploy for LocalStack"
       - sh: 'test -n "$AWS_REGION"'
         msg: "AWS_REGION must be set"
+      - sh: 'test -n "{{.TF_STATE_BUCKET}}"'
+        msg: "TF_STATE_BUCKET must be set (S3 bucket holding Terraform state)"
     cmds:
-      - npx --no-install cdk deploy {{.APP}} -c env={{.ENV}} --all --require-approval never --outputs-file build/outputs.{{.ENV}}.json
+      - task: plan
+        vars: { ENV: "{{.ENV}}" }
+      - cd {{.TF_DIR}} && terraform apply -input=false -auto-approve ../build/plan.{{.ENV}}.tfplan
+      - cd {{.TF_DIR}} && terraform output -json > ../build/outputs.{{.ENV}}.json
 
   smoke:
     desc: Post-deploy smoke test for ENV (task smoke ENV=dev). One synthetic event, asserted in the archive.

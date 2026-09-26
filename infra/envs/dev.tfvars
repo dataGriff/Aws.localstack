@@ -1,0 +1,14 @@
+environment                     = "dev"
+is_local                        = false
+log_retention_days              = 14
+translator_timeout_seconds      = 30
+handler_timeout_seconds         = 30
+max_receive_count               = 3
+rule_retry_attempts             = 185
+rule_max_event_age_seconds      = 86400
+archive_batch_size              = 1000
+archive_batching_window_seconds = 60
+archive_writer_timeout_seconds  = 300
+archive_max_concurrency         = 2
+idempotency_ttl_seconds         = 604800
+iceberg_sigv4                   = true
