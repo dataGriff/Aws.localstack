@@ -14,7 +14,7 @@ dependencies = [
 [project.optional-dependencies]
 # Only the archive writer image installs these (PyArrow is too large for a zip).
 iceberg = [
-  "pyiceberg[pyarrow]>=0.12,<0.13",
+  "pyiceberg[pyarrow,pyiceberg-core]>=0.12,<0.13",
 ]
 
 [dependency-groups]
@@ -30,6 +30,7 @@ dev = [
   "constructs>=10.4,<11",
   "boto3-stubs[essential,events,sqs,dynamodb,s3,cloudformation,s3tables]",
   "event-platform[iceberg]",
+  "pyiceberg[sql-sqlite]>=0.12,<0.13",
 ]
 
 [build-system]

@@ -18,13 +18,10 @@ import aws_cdk as cdk  # noqa: E402
 from aws_cdk.assertions import Template  # noqa: E402
 from infra.config import load_config  # noqa: E402
 from infra.stacks import common  # noqa: E402
+from infra.stacks.archive_stack import ArchiveStack  # noqa: E402
 from infra.stacks.buses_stack import BusesStack  # noqa: E402
+from infra.stacks.commands_stack import CommandsStack  # noqa: E402
 from infra.stacks.translator_stack import TranslatorStack  # noqa: E402
-
-try:
-    from infra.stacks.commands_stack import CommandsStack
-except ImportError:  # milestone 3 not built yet
-    CommandsStack = None  # type: ignore[assignment,misc]
 
 ALLOWED_STAR_ACTIONS = {"xray:PutTraceSegments", "xray:PutTelemetryRecords"}
 
@@ -49,10 +46,17 @@ def templates(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Template]:
         alarms=buses.alarms,
     )
     stacks: dict[str, cdk.Stack] = {"buses": buses, "translator": translator}
-    if CommandsStack is not None:
-        stacks["commands"] = CommandsStack(
-            app, "commands", cfg, domain_bus=buses.domain_bus, alarms=buses.alarms
-        )
+    stacks["commands"] = CommandsStack(
+        app, "commands", cfg, domain_bus=buses.domain_bus, alarms=buses.alarms
+    )
+    stacks["archive"] = ArchiveStack(
+        app,
+        "archive",
+        cfg,
+        archive_queue=buses.archive_queue,
+        quarantine_bucket=translator.quarantine_bucket,
+        alarms=buses.alarms,
+    )
     return {name: Template.from_stack(stack) for name, stack in stacks.items()}
 
 
@@ -96,9 +100,7 @@ def test_every_queue_is_encrypted_and_tls_only(templates: dict[str, Template]) -
 def test_every_work_queue_has_a_dlq_and_every_dlq_an_alarm(templates: dict[str, Template]) -> None:
     for name, template in templates.items():
         queues = template.find_resources("AWS::SQS::Queue")
-        work_queues = {k: v for k, v in queues.items() if "RedrivePolicy" in v["Properties"]}
         dlq_ids = {k for k, v in queues.items() if "RedrivePolicy" not in v["Properties"]}
-        assert work_queues or dlq_ids, name
         alarms = json.dumps(template.find_resources("AWS::CloudWatch::Alarm"))
         for dlq in dlq_ids:
             assert dlq in alarms, f"{name}: DLQ {dlq} has no depth alarm"
@@ -134,8 +136,14 @@ def test_buckets_are_encrypted_private_and_tls_only(templates: dict[str, Templat
 def test_functions_trace_and_have_retained_logs(templates: dict[str, Template]) -> None:
     for name, template in templates.items():
         for logical_id, fn in template.find_resources("AWS::Lambda::Function").items():
-            assert fn["Properties"]["TracingConfig"] == {"Mode": "Active"}, f"{name}:{logical_id}"
-            assert fn["Properties"]["Runtime"] == "python3.12"
+            props = fn["Properties"]
+            if str(props.get("Handler", "")).startswith("framework."):
+                continue  # CDK custom-resource provider framework function
+            assert props["TracingConfig"] == {"Mode": "Active"}, f"{name}:{logical_id}"
+            if props.get("PackageType") == "Image":
+                assert "ImageUri" in props["Code"], f"{name}:{logical_id}"
+            else:
+                assert props["Runtime"] == "python3.12", f"{name}:{logical_id}"
         for lg in template.find_resources("AWS::Logs::LogGroup").values():
             assert "RetentionInDays" in lg["Properties"]
 

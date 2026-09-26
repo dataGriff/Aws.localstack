@@ -13,6 +13,7 @@ for p in (ROOT, ROOT / "src"):
 import aws_cdk as cdk  # noqa: E402
 
 from infra.config import cdk_environment, load_config  # noqa: E402
+from infra.stacks.archive_stack import ArchiveStack  # noqa: E402
 from infra.stacks.buses_stack import BusesStack  # noqa: E402
 from infra.stacks.commands_stack import CommandsStack  # noqa: E402
 from infra.stacks.translator_stack import TranslatorStack  # noqa: E402
@@ -31,11 +32,21 @@ translator = TranslatorStack(
     domain_bus=buses.domain_bus,
     alarms=buses.alarms,
 )
-translator.add_dependency(buses)
+translator.add_stack_dependency(buses)
 commands = CommandsStack(
     app, cfg.stack_name("commands"), cfg, env=env, domain_bus=buses.domain_bus, alarms=buses.alarms
 )
-commands.add_dependency(buses)
+commands.add_stack_dependency(buses)
+archive = ArchiveStack(
+    app,
+    cfg.stack_name("archive"),
+    cfg,
+    env=env,
+    archive_queue=buses.archive_queue,
+    quarantine_bucket=translator.quarantine_bucket,
+    alarms=buses.alarms,
+)
+archive.add_stack_dependency(translator)
 
 for key, value in cfg.tags.items():
     cdk.Tags.of(app).add(key, value)
