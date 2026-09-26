@@ -70,4 +70,5 @@ mypy_path = "src"
 packages = ["shared", "domain", "iceberg", "functions"]
 strict = true
 warn_unused_ignores = false
+disallow_untyped_decorators = false
 ignore_missing_imports = true

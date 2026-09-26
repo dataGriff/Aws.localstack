@@ -13,6 +13,7 @@ vars:
 
 env:
   UV_PYTHON: "3.12"
+  CDK_DISABLE_CLI_TELEMETRY: "true"
   # Every local-only command talks to LocalStack through these. Deploy/smoke/diff override them.
   AWS_ENDPOINT_URL: '{{if eq .ENV "local"}}{{.LOCALSTACK_ENDPOINT}}{{else}}{{.AWS_ENDPOINT_URL}}{{end}}'
   AWS_ACCESS_KEY_ID: '{{if eq .ENV "local"}}test{{else}}{{.AWS_ACCESS_KEY_ID}}{{end}}'
