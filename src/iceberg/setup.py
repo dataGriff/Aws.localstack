@@ -1,4 +1,7 @@
-"""Idempotent namespace and table creation. Run by the table-setup Lambda that Terraform invokes on every apply (all environments)."""
+"""Idempotent namespace and table creation.
+
+Run by the table-setup Lambda that Terraform invokes on every apply, in every environment.
+"""
 
 from __future__ import annotations
 
