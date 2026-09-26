@@ -2,7 +2,7 @@
 # S3 Tables, container-image Lambdas and ECR need the licensed image and LOCALSTACK_AUTH_TOKEN.
 services:
   localstack:
-    image: localstack/localstack-pro:4
+    image: localstack/localstack-pro:2026.08
     container_name: localstack
     ports:
       - "127.0.0.1:4566:4566"
